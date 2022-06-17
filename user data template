@@ -1,0 +1,52 @@
+#!/bin/bash
+yum update -y
+yum install epel-release -y
+yum install -y python3
+yum install bird jq -y
+yum install vlan -y
+cat <<\EOF >> /etc/sysconfig/network-scripts/ifcfg-bond0.${METAL_VXLAN}
+DEVICE=bond0.${METAL_VXLAN}
+NAME=bond0.${METAL_VXLAN}
+IPADDR=192.168.200.2
+NETMASK=255.255.255.252
+GATEWAY=192.168.200.1
+VLAN=yes
+BOOTPROTO=none
+ONBOOT=yes
+USERCTL=no
+TYPE=Bond
+BONDING_OPTS="mode=4 miimon=100 downdelay=200 updelay=200"
+EOF
+cat <<\EOF > /etc/bird.conf
+filter packet_bgp {
+  accept;
+}
+
+router id 192.168.200.2;
+
+protocol direct {
+  interface "bond0.${METAL_VXLAN}"; # Restrict network interfaces BIRD works with
+}
+
+protocol kernel {
+  persist; # Don't remove routes on bird shutdown
+  scan time 20; # Scan kernel routing table every 20 seconds
+  import all; # Default is import all
+  export all; # Default is export none
+}
+
+# This pseudo-protocol watches all interface up/down events.
+protocol device {
+  scan time 10; # Scan interfaces every 10 seconds
+}
+
+protocol bgp neighbor_v4_1 {
+  export filter packet_bgp;
+  local as 65100;
+  neighbor 192.168.200.1 as 64512;
+  password "equinix";
+}
+EOF
+
+systemctl start bird
+systemctl restart network
